@@ -1,0 +1,66 @@
+- name: Install NFS package
+  hosts: nfshost nfsclient
+  become: true
+  tasks:
+   - name: Install package
+     ansible.builtin.package:
+       name: nfs-utils
+       state: present
+
+   - name: Disable firewall
+     ansible.builtin.systemd:
+       name: firewalld
+       enabled: no
+       state: stopped
+
+- name: NFS host
+  hosts: nfshost
+  become: true
+  tasks:
+   - name: Enable nfs server systemd
+     ansible.builtin.systemd:
+       name: nfs-server
+       enabled: yes
+       state: started
+
+   - name: Enable nfs server rpcbind
+     ansible.builtin.systemd:
+       name: rpcbind
+       enabled: yes
+       state: started
+
+   - name: Put line in exports
+     lineinfile:
+       path: /etc/exports
+       line: '/media/volume/juews_nfs/nfs_dir 10.3.254.0/24(rw)'
+       state: present
+
+   - name: Export NFS wooooo
+     command: exportfs -r
+
+
+- name: NFS client
+  hosts: nfsclient
+  become: true
+  tasks:
+   - name: Make mountpoint directory
+     ansible.builtin.file:
+       path: /nfs
+       state: directory
+       mode: '0755'
+
+   - name: Put line in fstab
+     lineinfile:
+       path: /etc/fstab
+       regexp: '^10\.3\.254\.199:/media/volume/juews_nfs/nfs_dir'
+       line: '10.3.254.199:/media/volume/juews_nfs/nfs_dir /nfs nfs rw 0 0'
+       state: present
+
+   - name: Run mount -a
+     command: mount -a
+
+#   - name: Oppsies
+#     lineinfile:
+#       path: /etc/fstab
+#       regexp: '^\^10\\.3\\.254\\.69'
+#       state: absent
