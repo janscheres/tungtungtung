@@ -1,0 +1,157 @@
+- name: Install Slurm and Munge packages and add things to hosts
+  hosts: computecpu computegpu login
+  become: true
+  tasks:
+    - name: Install packages on all nodes
+      dnf:
+        name:
+          - slurm
+          - slurm-libs
+          - munge
+          - munge-libs
+        state: present
+
+    - name: Add all to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item }}"
+        state: present
+      with_items:
+        - "10.3.254.125 login"
+        - "10.3.254.199 compute-1-of-3"
+        - "10.3.254.7 compute-2-of-3"
+        - "10.3.254.189 compute-3-of-3"
+        - "10.3.254.138 compute-gpu"
+          #    - name: Ooops
+          #lineinfile:
+          #path: /etc/hosts
+          #regexp: '^10\.3\.254\.138\s+gpu-1$'
+          #state: absent
+
+- name: Install Slurmctld and create munge key on login node
+  hosts: login
+  become: true
+  tasks:
+    - name: Install Slurmctld on login node
+      dnf:
+        name:
+          - slurm-slurmctld
+        state: present
+
+    - name: Generate munge.key - this the good shit
+      command: /usr/sbin/create-munge-key
+      args:
+        creates: /etc/munge/munge.key
+
+    - name: Copy munge key to nice place (the dodgy alley)
+      fetch:
+        src: /etc/munge/munge.key
+        dest: files/
+        flat: true
+
+- name: Install Slurmd on compute nodes and copy munge key from login
+  hosts: computecpu computegpu
+  become: true
+  tasks:
+    - name: Install Slurmd on compute nodes
+      dnf:
+        name:
+          - slurm-slurmd
+        state: present
+
+    - name: Distribute munge.key (the drug deal)
+      copy:
+        src: files/munge.key
+        dest: /etc/munge/munge.key
+        owner: munge
+        group: munge
+        mode: '0400'
+
+- name: Enable and start munge and configure Slurm
+  hosts: computecpu computegpu login
+  become: true
+  tasks:
+    - name: Enable and start Munge service
+      systemd:
+        name: munge
+        enabled: true
+        state: started
+
+    - name: Ensure slurm user exists
+      user:
+        name: slurm
+        system: yes
+        shell: /sbin/nologin
+
+    - name: Distribute Slurm config
+      copy:
+        src: files/slurm.conf
+        dest: /etc/slurm/slurm.conf
+        owner: slurm
+        group: slurm
+        mode: '0644'
+
+    - name: Create /var/log/slurm dir
+      file:
+        path: /var/log/slurm
+        state: directory
+        owner: slurm
+        group: slurm
+        mode: '0755'
+
+- name: Create controller spool dir on login
+  hosts: login
+  become: true
+  tasks:
+    - name: Create /var/spool/slurmctld dir
+      file:
+        path: /var/spool/slurmctld
+        state: directory
+        owner: slurm
+        group: slurm
+        mode: '0755'
+
+- name: Create compute spool dir on compute nodes
+  hosts: computecpu computegpu
+  become: true
+  tasks:
+    - name: Create /var/spool/slurmd dir
+      file:
+        path: /var/spool/slurmd
+        state: directory
+        owner: slurm
+        group: slurm
+        mode: '0755'
+
+- name: Configure GRES for GPU compute node
+  hosts: computegpu
+  become: true
+  tasks:
+    - name: Ensure /etc/slurm/gres.conf all good
+      copy:
+        dest: /etc/slurm/gres.conf
+        content: |
+          NodeName=compute-gpu Name=gpu Type=GRID-A100X-20C Count=1
+        owner: slurm
+        group: slurm
+        mode: '0644'
+
+- name: Enable and start slurmctld on login
+  hosts: login
+  become: true
+  tasks:
+    - name: Enable and start slurmctld
+      systemd:
+        name: slurmctld
+        enabled: yes
+        state: restarted
+
+- name: Enable and start slurmd on compute
+  hosts: computecpu computegpu
+  become: true
+  tasks:
+    - name: Enable and start slurmd
+      systemd:
+        name: slurmd
+        enabled: yes
+        state: restarted
