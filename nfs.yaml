@@ -32,7 +32,7 @@
    - name: Put line in exports
      lineinfile:
        path: /etc/exports
-       line: '/media/volume/juews_nfs/nfs_dir 10.3.254.0/24(rw)'
+       line: '/media/volume/juews_nfs/nfs_dir 10.3.254.0/24(rw,no_root_squash)'
        state: present
 
    - name: Export NFS wooooo
@@ -53,7 +53,7 @@
      lineinfile:
        path: /etc/fstab
        regexp: '^10\.3\.254\.199:/media/volume/juews_nfs/nfs_dir'
-       line: '10.3.254.199:/media/volume/juews_nfs/nfs_dir /nfs nfs rw 0 0'
+       line: '10.3.254.199:/media/volume/juews_nfs/nfs_dir /nfs nfs rw,_netdev 0 0'
        state: present
 
    - name: Run mount -a

@@ -1,0 +1,108 @@
+- name: 1. Install System Deps on all nodes
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install dev tools
+      ansible.builtin.dnf:
+        name: '@Development Tools'
+        state: present
+    - name: Install other
+      ansible.builtin.dnf:
+        name: [git, python3, curl, file, unzip]
+        state: present
+
+- name: 2. Clone Spack and Set Permissions
+  hosts: nfshost
+  become: yes
+  tasks:
+    - name: Create main dir for spack
+      ansible.builtin.file:
+        path: /nfs/spack
+        state: directory
+        mode: '0775'
+        group: exouser
+    - name: Create dir for spack to install stuff to
+      ansible.builtin.file:
+        path: /nfs/spack-installs
+        state: directory
+        mode: '2775'
+        group: exouser
+    - name: Create spack cache dir
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '2775'
+        group: exouser
+      loop:
+        - /nfs/spack-cache
+        - /nfs/spack-cache/misc
+    - name: Clone latest release (as of 28/10/2025) of Spack
+      ansible.builtin.git:
+        repo: 'https://github.com/spack/spack.git'
+        dest: /nfs/spack
+        version: v1.0.2
+        single_branch: yes
+        depth: 1
+    - name: Ensure all Spack code is group-owned
+      ansible.builtin.file:
+        path: /nfs/spack
+        state: directory
+        recurse: yes
+        group: exouser
+
+    - name: Make Spack internal dirs group-writable
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '2775' # <-- FIX 1: Add setgid to internal dirs
+        group: exouser
+        recurse: yes
+      loop:
+        - /nfs/spack/var
+        - /nfs/spack/etc/spack
+
+- name: 3. Create Spack config
+  hosts: nfshost
+  become: yes
+  tasks:
+    - name: Create spack config dir
+      ansible.builtin.file:
+        path: /nfs/spack/etc/spack
+        state: directory
+        mode: '0755'
+        group: exouser
+    - name: Create the main 'config.yaml'
+      ansible.builtin.copy:
+        dest: /nfs/spack/etc/spack/config.yaml
+        group: exouser
+        content: |
+          config:
+            install_tree: /nfs/spack-installs
+            misc_cache: /nfs/spack-cache/misc
+            shared: true
+            group: exouser
+            umask: 022
+    - name: Create 'packages.yaml' to set HPL defaults
+      ansible.builtin.copy:
+        dest: /nfs/spack/etc/spack/packages.yaml
+        group: exouser
+        content: |
+          packages:
+            all:
+              providers:
+                mpi: [openmpi]
+
+- name: 4. Setup env forall users
+  hosts: all
+  become: yes
+  tasks:
+    - name: Deploy environment script (with correct path)
+      ansible.builtin.copy:
+        dest: /etc/profile.d/spack.sh
+        mode: '0644'
+        content: |
+          #!/bin/bash
+          export SPACK_ROOT=/nfs/spack
+          if [ -d "$SPACK_ROOT" ]; then
+            . "$SPACK_ROOT/share/spack/setup-env.sh"
+          fi
